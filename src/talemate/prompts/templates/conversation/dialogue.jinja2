@@ -69,12 +69,22 @@
 {% endset %}
 {# END FINAL ACTING INSTRUCTIONS #}
 
+{# SCENE GUIDELINES #}
+{% set scene_guidelines -%}
+{% if agent_config("conversation.content.use_scene_intent") %}{% with exclude_phase_intent=True %}{% include "scene-intent.jinja2" %}{% endwith %}{% endif %}
+
+{% if agent_config("conversation.content.use_writing_style") %}{% include "writing-style-instructions.jinja2" %}{% endif %}
+{% endset -%}
+{# END SCENE GUIDELINES #}
+
 {# RENDER PROMPT #}
 {% set scene_context_length = count_tokens(scene_context_text) %}
 {% set large_context_threshold = 1024 %}
 {{ rendered_context_text }}
 
 {{ rag_context_text }}
+
+{{ scene_guidelines }}
 
 {{ task_main_text }}
 

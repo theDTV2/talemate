@@ -1,9 +1,9 @@
 import structlog
-import jinja2
 from .core import Node, GraphState, PropertyField, InputValueError, UNRESOLVED
 from .core.dynamic import DynamicSocketNodeBase
 from .registry import register
 from talemate.util.prompt import condensed
+from talemate.prompts.base import Prompt
 
 log = structlog.get_logger("talemate.game.engine.nodes.string")
 
@@ -372,15 +372,37 @@ class AdvancedFormat(DynamicSocketNodeBase):
 @register("prompt/Jinja2Format")
 class Jinja2Format(AdvancedFormat):
     """
-    Formats a string using jinja2
+    Formats a string using jinja2 with Prompt's template environment
+
+    Uses a Prompt instance to render templates, providing access to all
+    Prompt globals, filters, and template features.
+
+    Inputs:
+    - template: The template string to render
+    - variables: Dictionary of variables for the template
+    - scope: Optional agent scope (e.g., "director") for template includes
     """
 
     def __init__(self, title="Jinja2 Format", **kwargs):
         super().__init__(title=title, **kwargs)
 
+    def add_static_inputs(self):
+        super().add_static_inputs()
+        self.add_input("scope", socket_type="str", optional=True)
+
     async def format(self, template: str, variables: dict) -> str:
-        template_env = jinja2.Environment(loader=jinja2.BaseLoader())
-        return template_env.from_string(template).render(variables)
+        # Get the scope if provided
+        scope = self.normalized_input_value("scope")
+
+        # Determine agent_type from scope
+        agent_type = ""
+        if scope and scope != "scene":
+            agent_type = scope
+
+        # Create a Prompt instance from the template text with agent_type context
+        prompt = Prompt.from_text(template, vars=variables, agent_type=agent_type)
+        # Render the template using Prompt's render method
+        return prompt.render()
 
 
 @register("data/string/Case")
@@ -560,9 +582,13 @@ class Extract(Node):
     """
     Extracts a portion of a string using a left and right anchor
 
-    Whatever is between the left and right anchors will be extracted.
+    Finds the first valid block between anchors (no nested left_anchor inside).
+    Falls back to everything after the left_anchor if no complete block is found.
 
-    The first occurrence of the left anchor will be used.
+    Examples:
+    - "<TAG>nested<TAG>value</TAG>" -> "value" (first clean block)
+    - "<TAG>value</TAG> ... <TAG>other</TAG>" -> "value" (first valid block)
+    - "<TAG>no closing tag" -> "no closing tag" (fallback)
 
     Inputs:
 
@@ -615,9 +641,21 @@ class Extract(Node):
         right_anchor = self.normalized_input_value("right_anchor") or ""
         trim = self.normalized_input_value("trim")
 
-        parts = string.split(left_anchor, 1)
+        result = None
+
+        # Split by left anchor to get segments
+        parts = string.split(left_anchor)
+
         if len(parts) > 1:
-            result = parts[1].split(right_anchor, 1)[0]
+            # Try to find the first valid block (segment with right_anchor, meaning no nested left_anchor)
+            for part in parts[1:]:
+                if right_anchor in part:
+                    result = part.split(right_anchor, 1)[0]
+                    break
+
+            # Fallback: if no valid block found, take everything after the last left_anchor
+            if result is None:
+                result = parts[-1]
         else:
             result = ""
 
